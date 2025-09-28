@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ## copying all files to the working directory
-COPY . /app/
+COPY . .
 
 ## Install python dependencies
 RUN pip install --no-cache-dir -e .

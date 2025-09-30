@@ -1,0 +1,114 @@
+name: Build, Scan, & Deploy to AWS App Runner
+
+# Configure the workflow to run on a push to the 'main' branch
+on:
+  push:
+    branches:
+      - main
+
+# Define environment variables (similar to your Jenkinsfile environment block)
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: my-repo
+  IMAGE_TAG: latest
+  SERVICE_NAME: llmops-medical-service
+
+jobs:
+  build_and_deploy:
+    # Use an Ubuntu runner
+    runs-on: ubuntu-latest
+    
+    # Define permissions for the workflow to interact with OIDC for AWS and to write a release/artifact
+    permissions:
+      contents: read
+      id-token: write # Required for AWS OIDC authentication
+
+    steps:
+      # The 'Clone GitHub Repo' stage is handled automatically by the checkout action
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------------
+      # Stage: Build, Scan, and Push Docker Image to ECR
+      # ----------------------------------------------------------------------
+      
+      - name: Configure AWS Credentials
+        # This action assumes you have configured an AWS IAM Role for OIDC in your AWS account
+        # and set up a corresponding policy to allow ECR push and App Runner deployment.
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }} # e.g., arn:aws:iam::123456789012:role/github-actions-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # The ECR URL is automatically available from the login step's output
+      - name: Set Full Image Tag
+        id: set-ecr-url
+        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+          
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false # Do not push yet
+          tags: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          
+      - name: Scan Docker Image with Trivy
+        # Use Trivy Action to perform the scan
+        uses: aquasec/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          format: 'json'
+          output: 'trivy-report.json'
+          severity: 'HIGH,CRITICAL'
+          # Fail the build if critical vulnerabilities are found (optional, remove/change exit-code if you want to allow failures)
+          exit-code: '1'
+
+      - name: Upload Trivy Scan Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-report
+          path: trivy-report.json
+          
+      - name: Push Docker Image to ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true # Now push the image
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+
+      # ----------------------------------------------------------------------
+      # Stage: Deploy to AWS App Runner
+      # ----------------------------------------------------------------------
+
+      - name: Trigger App Runner Deployment
+        # The AWS CLI is pre-installed on the ubuntu-latest runner
+        run: |
+          echo "Checking for App Runner Service ARN for: ${{ env.SERVICE_NAME }}"
+          SERVICE_ARN=$(aws apprunner list-services --query "ServiceSummaryList[?ServiceName=='${
+            { env.SERVICE_NAME }
+            }'].ServiceArn" --output text --region $
+            {
+            { env.AWS_REGION }
+            }
+          )
+
+          if [ -z "$SERVICE_ARN" ]; then
+            echo "Error: App Runner service '${
+              { env.SERVICE_NAME }
+              }' not found."
+            exit 1
+          fi
+
+          echo "Found App Runner Service ARN: $SERVICE_ARN"
+          echo "Triggering deployment for new image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+
+          # The App Runner service must be configured to use ECR and have a valid ECR access role.
+          aws apprunner start-deployment --service-arn "$SERVICE_ARN" --region $
+          {
+          { env.AWS_REGION }
+          }

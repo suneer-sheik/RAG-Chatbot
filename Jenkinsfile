@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = 'us-east-1'
+        AWS_REGION = 'ap-south-1'
         ECR_REPO = 'my-repo'
         IMAGE_TAG = 'latest'
         SERVICE_NAME = 'llmops-medical-service'
@@ -40,7 +40,7 @@ pipeline {
             }
         }
 
-         stage('Deploy to AWS App Runner') {
+        stage('Deploy to AWS App Runner') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-token']]) {
                     script {

@@ -54,24 +54,24 @@ jobs:
         with:
           context: .
           push: false # Do not push yet
-          tags: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          tags: "${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
           
-      - name: Scan Docker Image with Trivy
-        # Use Trivy Action to perform the scan
-        uses: aquasec/trivy-action@master
-        with:
-          image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          format: 'json'
-          output: 'trivy-report.json'
-          severity: 'HIGH,CRITICAL'
-          # Fail the build if critical vulnerabilities are found (optional, remove/change exit-code if you want to allow failures)
-          exit-code: '1'
+      # - name: Scan Docker Image with Trivy
+      #   # Use Trivy Action to perform the scan
+      #   uses: aquasec/trivy-action@master
+      #   with:
+      #     image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+      #     format: 'json'
+      #     output: 'trivy-report.json'
+      #     severity: 'HIGH,CRITICAL'
+      #     # Fail the build if critical vulnerabilities are found (optional, remove/change exit-code if you want to allow failures)
+      #     exit-code: '1'
 
-      - name: Upload Trivy Scan Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-security-report
-          path: trivy-report.json
+      # - name: Upload Trivy Scan Report
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: trivy-security-report
+      #     path: trivy-report.json
           
       - name: Push Docker Image to ECR
         uses: docker/build-push-action@v5

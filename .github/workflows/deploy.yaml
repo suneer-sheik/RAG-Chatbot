@@ -4,7 +4,26 @@ name: Build, Scan, & Deploy to AWS App Runner
 on:
   push:
     branches:
-      - main
+      - dev
+  
+  workflow_dispatch:
+    inputs:
+      aws-region:
+        description: 'AWS Region'
+        required: true
+        default: 'ap-south-1'
+      ecr-repository:
+        description: 'ECR Repository Name'
+        required: true
+        default: 'my-repo'
+      image-tag:
+        description: 'Docker Image Tag'
+        required: true
+        default: 'latest'
+      service-name:
+        description: 'App Runner Service Name'
+        required: true
+        default: 'llmops-medical-service'
 
 # Define environment variables (similar to your Jenkinsfile environment block)
 env:
@@ -86,29 +105,16 @@ jobs:
       # ----------------------------------------------------------------------
 
       - name: Trigger App Runner Deployment
-        # The AWS CLI is pre-installed on the ubuntu-latest runner
         run: |
           echo "Checking for App Runner Service ARN for: ${{ env.SERVICE_NAME }}"
-          SERVICE_ARN=$(aws apprunner list-services --query "ServiceSummaryList[?ServiceName=='${
-            { env.SERVICE_NAME }
-            }'].ServiceArn" --output text --region $
-            {
-            { env.AWS_REGION }
-            }
-          )
+          SERVICE_ARN=$(aws apprunner list-services --query "ServiceSummaryList[?ServiceName=='${{ env.SERVICE_NAME }}'].ServiceArn" --output text --region ${{ env.AWS_REGION }})
 
           if [ -z "$SERVICE_ARN" ]; then
-            echo "Error: App Runner service '${
-              { env.SERVICE_NAME }
-              }' not found."
+            echo "Error: App Runner service '${{ env.SERVICE_NAME }}' not found."
             exit 1
           fi
 
           echo "Found App Runner Service ARN: $SERVICE_ARN"
           echo "Triggering deployment for new image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
 
-          # The App Runner service must be configured to use ECR and have a valid ECR access role.
-          aws apprunner start-deployment --service-arn "$SERVICE_ARN" --region $
-          {
-          { env.AWS_REGION }
-          }
+          aws apprunner start-deployment --service-arn "$SERVICE_ARN" --region ${{ env.AWS_REGION }}

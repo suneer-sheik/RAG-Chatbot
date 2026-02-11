@@ -1,0 +1,984 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  POSTGRESJDBCURL:  
+    Type: String
+    Default: "jdbc5432devdb"
+  POSTGRESUSER:  
+    Type: String
+    Default: "Postgres"
+  POSTGRESPASS:  
+    Type: String
+    Default: "Postgres-pass"
+    NoEcho: true
+  POSTGRESDBNAME:
+    Type: String
+    Default: "Postgres-DB-name"
+  POSTGRESDRIVER:
+    Type: String
+    Default: "org.postgresql.Driver"
+  POSTGRESDRIVERPATH:  
+    Type: String
+    Default: "s3://ias-reporting-solution-dev/voxanalytics/jar/postgresql-42.6.0.jar"
+  ORACLEJDBCURL:  
+    Type: String
+    Default: "jdbc1521devdb"
+  ORACLEUSER:  
+    Type: String
+    Default: "ITSM"
+  ORACLEPASS:  
+    Type: String
+    Default: "ITSM-pass"
+    NoEcho: true                                                                                                     
+  REDSHIFTJDBCURL:  
+    Type: String
+    Default: "jdbc3306devdb"
+  REDSHIFTUSER:  
+    Type: String
+    Default: "master"
+  REDSHIFTPASS:  
+    Type: String
+    Default: "example-password"
+    NoEcho: true
+  SECRETID:  
+    Type: String
+    Default: "example-id"
+    NoEcho: true
+  Environment:  
+    Type: String
+    Default: dev
+  ReportingS3Bucket:
+    Type: String
+    Default: bucket
+  SUBNETID:
+    Type: String
+    Default: subnet-124466
+  SGID:
+    Type: String
+    Default: sgid-123
+
+Resources:
+  PostgresConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Sub ${AWS::AccountId}
+      ConnectionInput: 
+        ConnectionType: JDBC 
+        Description: 'Posgtres DB connection details'
+        Name: !Sub ${Environment}-Postgres-conn
+        PhysicalConnectionRequirements:
+          SecurityGroupIdList:
+           - Fn::ImportValue:
+              Fn::Sub: ${Environment}-vox-analytics-sg
+          SubnetId: !Sub ${SUBNETID}
+        ConnectionProperties: {
+            "JDBC_CONNECTION_URL": !Ref POSTGRESJDBCURL,
+            "USERNAME": !Ref POSTGRESUSER,
+            "PASSWORD": !Ref POSTGRESPASS,
+            "DRIVERNAME": !Ref POSTGRESDRIVER,
+            "DRIVERPATH": !Ref POSTGRESDRIVERPATH,
+            "DATABASE_NAME": !Ref POSTGRESDBNAME,
+          }
+
+  OracleConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Sub ${AWS::AccountId}
+      ConnectionInput: 
+        ConnectionType: JDBC 
+        Description: 'Oracle DB connection details'
+        Name: !Sub ${Environment}-Oracle-conn
+        PhysicalConnectionRequirements:
+          SecurityGroupIdList:
+           - Fn::ImportValue:
+              Fn::Sub: ${Environment}-vox-analytics-sg
+          SubnetId: !Sub ${SUBNETID}
+        ConnectionProperties: {
+            "JDBC_CONNECTION_URL": !Ref ORACLEJDBCURL,
+            "USERNAME": !Ref ORACLEUSER,
+            "PASSWORD": !Ref ORACLEPASS
+          }
+
+  RedshiftConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Sub ${AWS::AccountId}
+      ConnectionInput: 
+        ConnectionType: JDBC 
+        Description: 'Redshift DB connection details'
+        Name: !Sub ${Environment}-redshift-target
+        PhysicalConnectionRequirements:
+          SecurityGroupIdList:
+           - Fn::ImportValue:
+              Fn::Sub: ${Environment}-vox-analytics-sg
+          SubnetId: !Sub ${SUBNETID}
+        ConnectionProperties: {
+            "JDBC_CONNECTION_URL": !Ref REDSHIFTJDBCURL,
+            "USERNAME": !Ref REDSHIFTUSER,
+            "PASSWORD": !Ref REDSHIFTPASS
+          }
+
+  NetworkConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Sub ${AWS::AccountId}
+      ConnectionInput: 
+        ConnectionType: JDBC 
+        Description: 'Network connection'
+        Name: !Sub ${Environment}-Network-conn
+        PhysicalConnectionRequirements:
+          SecurityGroupIdList:
+           - Fn::ImportValue:
+              Fn::Sub: ${Environment}-vox-analytics-sg
+          SubnetId: !Sub ${SUBNETID}
+        ConnectionProperties: {
+            "JDBC_CONNECTION_URL": !Ref ORACLEJDBCURL,
+            "USERNAME": !Ref ORACLEUSER,
+            "PASSWORD": !Ref ORACLEPASS
+          }
+
+  GlueJob1:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_staging_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_staging
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --bucket_name: !Ref ReportingS3Bucket
+        --config_file: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json     
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: MG.Maithri@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob2:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_requests_per_url_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_requests_per_url_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --automation_config: !Sub voxanalytics/${Environment}/config_files/automation_config.json
+        --dynamoDb_config: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json      
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: MG.Maithri@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X     
+  GlueJob3:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_requests_per_usecasename_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_requests_per_usecasename_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --automation_config: !Sub voxanalytics/${Environment}/config_files/automation_config.json
+        --dynamoDb_config: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json      
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: MG.Maithri@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob4:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_requests_per_app_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_requests_per_app_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --dynamoDb_config: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json      
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: ABHIJEET.PATIL2@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X 
+  GlueJob5:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_translate_metrics_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-translate_metrics_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment    
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --bucket_name: !Ref ReportingS3Bucket
+        --config_automation_file: !Sub voxanalytics/${Environment}/config_files/automation_config.json
+        --config_file: !Sub voxanalytics/${Environment}/config_files/translate_metrics_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: vagisha.phadke@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X 
+  GlueJob6:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_Executive_Summary_Dashboard_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-Executive_Summary_Dashboard_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment    
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --bucket_name: !Ref ReportingS3Bucket
+        --config_file: !Sub voxanalytics/${Environment}/config_files/executive_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: vagisha.phadke@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X 
+  GlueJob7:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_oracle_ITSM_User_staging_job.py
+      Connections: 
+          Connections: 
+          - !Ref OracleConnection
+      Description: OracleS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-oracle_ITSM_User_staging
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments:
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --vox_oracle_ITSM_user_config: !Sub voxanalytics/${Environment}/config_files/oracle_config.json
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/vox_credential_automation_functions.py,s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob8:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_oracle_ITSM_User_kpi_job.py
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-oracle_ITSM_User_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --vox_oracle_ITSM_user_config: !Sub voxanalytics/${Environment}/config_files/oracle_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob9:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_postgres_staging_job.py
+      Connections: 
+          Connections: 
+          - !Ref PostgresConnection
+      Description: PostgresS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-postgres_staging
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments:
+        --bucket_name: !Ref ReportingS3Bucket
+        --config_file: !Sub voxanalytics/${Environment}/config_files/postgres_config.json
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/vox_credential_automation_functions.py,s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: vagisha.phadke@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob10:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/VOX_Usage_Dashboard_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-VOX_usage_Dashboard_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --bucket_name: !Ref ReportingS3Bucket
+        --config_file: !Sub voxanalytics/${Environment}/config_files/postgres_config.json
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob11:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_oracle_ITSM_RM_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref OracleConnection
+      Description: OracleS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-oracle_ITSM_RM_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments:
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --Config_File: !Sub voxanalytics/${Environment}/config_files/oracle_rm_config.json
+        --Filters: !Sub voxanalytics/${Environment}/config_files/automation_config.json
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/vox_credential_automation_functions.py,s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --RM_query: !Sub voxanalytics/${Environment}/config_files/gpt_billing_query.txt
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: MG.Maithri@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob12:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_oracle_ITSM_RM_DATA_Dashboard_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-VOX_users_Dashboard_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --Config_File: !Sub voxanalytics/${Environment}/config_files/oracle_rm_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: MG.Maithri@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob13:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_api_usecasename_map.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-vox_api_usecasename_map
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments:
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --map_config: !Sub voxanalytics/${Environment}/config_files/vrt_usecase_map.json
+        --dynamoDb_config_dev: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: princia.fernandes@mresult.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob14:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_oracle_ITSM_VOX_OPS_Dashboard_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-oracle_ITSM_VOX_OPS_Dashboard_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --vox_ops_dashboard_config: !Sub voxanalytics/${Environment}/config_files/oracle_config.json
+        --change_request_query: !Sub voxanalytics/${Environment}/config_files/vox_support_query_change_request.txt
+        --prob_clock_query: !Sub voxanalytics/${Environment}/config_files/vox_support_query_prob_clock.txt
+        --request_query: !Sub voxanalytics/${Environment}/config_files/vox_support_query_request.txt
+        --automation_config: !Sub voxanalytics/${Environment}/config_files/automation_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: ABHIJEET.PATIL2@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob15:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_oracle_gpt_Billing_v2_Dashboard_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-oracle_VOX_gpt_billing_v2_Dashboard_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments:
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --Config_File: !Sub voxanalytics/${Environment}/config_files/oracle_rm_config.json
+        --Filters: !Sub voxanalytics/${Environment}/config_files/automation_config.json
+        --Gpt_billing_query: !Sub voxanalytics/${Environment}/config_files/gpt_billing_v2_query.txt
+        --Denied_filter: !Sub voxanalytics/${Environment}/config_files/gpt_billing_denied_query.txt
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/vox_credential_automation_functions.py,s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: princia.fernandes@mresult.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob16:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_Executive_Summary_Dashboard_kpi_staging_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-Executive_Summary_Dashboard_kpi_staging
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --bucket_name: !Ref ReportingS3Bucket
+        --config_file: !Sub voxanalytics/${Environment}/config_files/executive_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: vagisha.phadke@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X 
+  GlueJob17:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_api_staging_script_job.py
+      Connections: 
+          Connections: 
+          - !Ref NetworkConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_api_staging_script
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --dynamo_config_path: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob18:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_api_metrics_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_api_metrics_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --dynamo_config_path: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob19:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_api_mem_cpu_staging_script_job.py
+      Connections: 
+          Connections: 
+          - !Ref NetworkConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_api_mem_cpu_staging_script
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --dynamo_config_path: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob20:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_dynamo_api_mem_cpu_metrics_kpi_job.py
+      Connections: 
+          Connections: 
+          - !Ref RedshiftConnection
+      Description: RedshiftS3
+      ExecutionProperty: 
+        MaxConcurrentRuns: 1 
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-dynamo_api_mem_cpu_metrics_kpi
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --Bucket_Name: !Ref ReportingS3Bucket
+        --dynamo_config_path: !Sub voxanalytics/${Environment}/config_files/dynamo_config.json
+      Tags: 
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+  GlueJob21:
+    Type: AWS::Glue::Job
+    Properties:
+      Command: 
+        Name: glueetl
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/main_script_path/vox_analytics_email_alert_job.py
+      Connections: 
+          Connections: 
+          - !Ref NetworkConnection
+      Description: Networkconn
+      ExecutionProperty: 
+        MaxConcurrentRuns: 30
+      GlueVersion: 4.0
+      MaxRetries: 0
+      Name: !Sub ${Environment}-email_alert
+      NumberOfWorkers: 10
+      Role:
+       Fn::Sub:
+        - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueServiceRole
+        - Environment: !Ref Environment
+      DefaultArguments: 
+        --extra-py-files : !Sub s3://${ReportingS3Bucket}/voxanalytics/${Environment}/dependent_libraries/logger.py
+        --bucket_name: !Ref ReportingS3Bucket
+        --email_config_file_path: !Sub voxanalytics/${Environment}/config_files/email_config.json
+      Tags:
+        CostCenterID: 2331084
+        EnvType: !Sub ${Environment}
+        PrimaryOwner: kenneth.jeckell@pfizer.com
+        SecondaryOwner: DL-IAS-Platform-Operations@pfizer.com
+        ProjectCode: GPT-VOX-Analytics
+        DataClass: Yellow
+        Implementor: deepali.mali@pfizer.com
+      Timeout: 2880
+      WorkerType: G.1X
+
+Outputs:
+  GlueJob1:
+    Value: !Ref GlueJob1
+    Export:
+      Name: !Sub ${Environment}-GlueJob1
+  GlueJob2:
+    Value: !Ref GlueJob2
+    Export:
+      Name: !Sub ${Environment}-GlueJob2
+  GlueJob3:
+    Value: !Ref GlueJob3
+    Export:
+      Name: !Sub ${Environment}-GlueJob3
+  GlueJob4:
+    Value: !Ref GlueJob4
+    Export:
+      Name: !Sub ${Environment}-GlueJob4
+  GlueJob5:
+    Value: !Ref GlueJob5
+    Export:
+      Name: !Sub ${Environment}-GlueJob5
+  GlueJob6:
+    Value: !Ref GlueJob6
+    Export:
+      Name: !Sub ${Environment}-GlueJob6
+  GlueJob7:
+    Value: !Ref GlueJob7
+    Export:
+      Name: !Sub ${Environment}-GlueJob7
+  GlueJob8:
+    Value: !Ref GlueJob8
+    Export:
+      Name: !Sub ${Environment}-GlueJob8
+  GlueJob9:
+    Value: !Ref GlueJob9
+    Export:
+      Name: !Sub ${Environment}-GlueJob9
+  GlueJob10:
+    Value: !Ref GlueJob10
+    Export:
+      Name: !Sub ${Environment}-GlueJob10
+  GlueJob11:
+    Value: !Ref GlueJob11
+    Export:
+      Name: !Sub ${Environment}-GlueJob11
+  GlueJob12:
+    Value: !Ref GlueJob12
+    Export:
+      Name: !Sub ${Environment}-GlueJob12
+  GlueJob13:
+    Value: !Ref GlueJob13
+    Export:
+      Name: !Sub ${Environment}-GlueJob13
+  GlueJob14:
+    Value: !Ref GlueJob14
+    Export:
+      Name: !Sub ${Environment}-GlueJob14
+  GlueJob15:
+    Value: !Ref GlueJob15
+    Export:
+      Name: !Sub ${Environment}-GlueJob15
+  GlueJob16:
+    Value: !Ref GlueJob16
+    Export:
+      Name: !Sub ${Environment}-GlueJob16
+  GlueJob17:
+    Value: !Ref GlueJob17
+    Export:
+      Name: !Sub ${Environment}-GlueJob17
+  GlueJob18:
+    Value: !Ref GlueJob18
+    Export:
+      Name: !Sub ${Environment}-GlueJob18
+  GlueJob19:
+    Value: !Ref GlueJob19
+    Export:
+      Name: !Sub ${Environment}-GlueJob19
+  GlueJob20:
+    Value: !Ref GlueJob20
+    Export:
+      Name: !Sub ${Environment}-GlueJob20
+  GlueJob21:
+    Value: !Ref GlueJob21
+    Export:
+      Name: !Sub ${Environment}-GlueJob21
+  PostgresConnection:
+    Value: !Ref PostgresConnection
+    Export:
+      Name: !Sub ${Environment}-PostgresConnection
+  OracleConnection:
+    Value: !Ref OracleConnection
+    Export:
+      Name: !Sub ${Environment}-OracleConnection
+  RedshiftConnection:
+    Value: !Ref RedshiftConnection
+    Export:
+      Name: !Sub ${Environment}-RedshiftConnection
+  NetworkConnection:
+    Value: !Ref NetworkConnection
+    Export:
+      Name: !Sub ${Environment}-NetworkConnection

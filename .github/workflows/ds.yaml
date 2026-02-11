@@ -1,0 +1,162 @@
+
+name: Delete CloudFormation Stacks
+
+on:
+  workflow_dispatch:
+    inputs:
+      Environment:
+        type: choice
+        description: Deployment Environment
+        required: true
+        options: 
+        - dev
+        - test
+        - prod
+        - sbx
+      Delete_GlueTriggers-1:
+        type: boolean
+        description: Delete GlueTriggers-1 stack?
+        required: false
+
+      Delete_GlueTriggers:
+        type: boolean
+        description: Delete GlueTriggers stack?
+        required: false
+      
+      Delete_GlueWorkflows:
+        type: boolean
+        description: Delete GlueWorkflows stack?
+        required: false
+
+      Delete_GlueJobs-1:
+        type: boolean
+        description: Delete GlueJobs-1 stack?
+        required: false
+
+      Delete_GlueJobs:
+        type: boolean
+        description: Delete GlueJobs stack?
+        required: false
+
+      Delete_SharedResourcesForGlueJobs:
+        type: boolean
+        description: Delete SharedResourcesForGlueJobs stack?
+        required: false
+
+permissions:
+  id-token: write
+  contents: write      
+
+jobs:
+  deploy:
+    name: Delete CloudFormation Stack Sequentially
+    runs-on: [self-hosted, bolt-ubuntu]
+    environment: ${{ github.event.inputs.Environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/${{secrets.AWS_OIDC_ROLE}}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Adjust inputs based on selection
+        run: |
+          # Automatically handle dependencies based on user selection
+
+          # If GlueTriggers is selected automatically add Gluetriggers-1 for deletion
+          if [[ "${{ github.event.inputs.Delete_GlueTriggers}}" == "true" ]]; then
+            echo "GlueTriggers selected. Automatically adding Gluetriggers-1 for deletion."
+            echo "Delete_GlueTriggers-1=true" >> $GITHUB_ENV
+          fi
+
+          # If GlueWorkflows is selected automatically add Gluetriggers-1 and GlueTriggers for deletion
+          if [[ "${{ github.event.inputs.Delete_GlueWorkflows}}" == "true" ]]; then
+            echo "GlueWorkflows selected. Automatically adding Gluetriggers-1 and GlueTriggers for deletion."
+            echo "Delete_GlueTriggers-1=true" >> $GITHUB_ENV
+            echo "Delete_GlueTriggers=true" >> $GITHUB_ENV
+          fi
+
+          # If GlueJobs-1 is selected automatically add Gluetriggers-1, GlueTriggers and GlueWorkflows for deletion
+          if [[ "${{ github.event.inputs.Delete_GlueJobs-1}}" == "true" ]]; then
+            echo "GlueJobs-1 selected. Automatically adding Gluetriggers-1, GlueTriggers and GlueWorkflows for deletion."
+            echo "Delete_GlueTriggers-1=true" >> $GITHUB_ENV
+            echo "Delete_GlueTriggers=true" >> $GITHUB_ENV
+            echo "Delete_GlueWorkflows=true" >> $GITHUB_ENV
+          fi
+
+          # If GlueJobs is selected automatically add Gluetriggers-1, GlueTriggers, GlueWorkflows and GlueJobs-1 for deletion
+          if [[ "${{ github.event.inputs.Delete_GlueJobs}}" == "true" ]]; then
+            echo "GlueJobs selected. Automatically adding Gluetriggers-1, GlueTriggers, GlueWorkflows and GlueJobs-1 for deletion."
+            echo "Delete_GlueTriggers-1=true" >> $GITHUB_ENV
+            echo "Delete_GlueTriggers=true" >> $GITHUB_ENV
+            echo "Delete_GlueWorkflows=true" >> $GITHUB_ENV
+            echo "Delete_GlueJobs-1=true" >> $GITHUB_ENV
+          fi
+
+      - name: Delete Selected Stacks
+        run: |
+          set -e
+          ENV="${{ github.event.inputs.Environment }}"
+
+          stacks_to_delete=()
+
+          # Collect selected stacks dynamically based on adjusted inputs
+          if [[ "${{ github.event.inputs.Delete_GlueTriggers-1 }}" == "true" || "${{ env.Delete_GlueTriggers-1 }}" == "true" ]]; then 
+            stacks_to_delete+=("GlueTriggers-1")
+          fi
+          if [[ "${{ github.event.inputs.Delete_GlueTriggers }}" == "true" || "${{ env.Delete_GlueTriggers }}" == "true" ]]; then
+            stacks_to_delete+=("GlueTriggers")
+          fi
+          if [[ "${{ github.event.inputs.Delete_GlueWorkflows }}" == "true" || "${{ env.Delete_GlueWorkflows }}" == "true" ]]; then
+            stacks_to_delete+=("GlueWorkflows")
+          fi
+          if [[ "${{ github.event.inputs.Delete_GlueJobs-1 }}" == "true" || "${{ env.Delete_GlueJobs-1 }}" == "true" ]]; then
+            stacks_to_delete+=("GlueJobs-1")
+          fi
+          if [[ "${{ github.event.inputs.Delete_GlueJobs }}" == "true" || "${{ env.Delete_GlueJobs }}" == "true" ]]; then
+            stacks_to_delete+=("GlueJobs")
+          fi
+          if [[ "${{ github.event.inputs.Delete_SharedResourcesForGlueJobs }}" == "true" ]]; then
+            stacks_to_delete+=("SharedResourcesForGlueJobs")
+          fi
+
+          if [ ${#stacks_to_delete[@]} -eq 0 ]; then
+            echo "No stacks selected for deletion. Exiting."
+            exit 0
+          fi
+
+          # Iterate over selected stacks and delete them sequentially
+          for stack in "${stacks_to_delete[@]}"; do
+            stack_name="${{ github.event.inputs.Environment}}-${stack}"
+            echo "============================"
+            echo "Deleting stack: $stack_name"
+            echo "============================"
+
+            # Check if the stack exists
+            if ! aws cloudformation describe-stacks --stack-name "$stack_name" >/dev/null 2>&1; then
+              echo "Stack $stack_name not found. Skipping."
+              continue
+            fi
+
+            status=$(aws cloudformation describe-stacks --stack-name "$stack_name" --query "Stacks[0].StackStatus" --output text)
+            echo "Current status: $status"
+            
+            if [[ "$status" != "DELETE_COMPLETE" && "$status" != "DELETE_FAILED" ]]; then
+              echo "Deleting $stack_name..."
+
+              # Delete the stack
+              aws cloudformation delete-stack --stack-name $stack_name --output json
+
+              # Wait for the stack to be deleted (status should become DELETE_COMPLETE)
+              aws cloudformation wait stack-delete-complete --stack-name $stack_name
+
+              echo "Stack $stack_name deleted successfully"
+            else
+              echo "Stack $stack_name is already in $status state. Skipping."
+            fi
+          done
+
+          echo "All selected stacks deleted successfully"

@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:                                                                                                       
+  Environment:  
+    Type: String
+    Default: dev
+  AccountID:
+    Type: String
+    Default: 123456789
+  ReportingS3Bucket:
+    Type: String
+    Default: bucket
+  Secretarn:
+    Type: String
+    Default: dev-vsl-airflow-ias-reporting-vessel-dynamo-VfLr6I
+  Kmskey:
+    Type: String
+    Default: 999aea9c-4219-49f1-a479-a48ececcdbfa
+  Secretarnnp:
+    Type: String
+    Default: prod-dev-vsl-airflow-ias-reporting-vessel-dynamo-VfLr6I
+  snowflakesecretarn:
+    Type: String
+    Default: CUSPFE-SNOWFLAKE-VOXANALYTICS-9J6gKH
+  Kmskeynp:
+    Type: String
+    Default: 999aea9c-4219-49f1-a479-a48ececcdbfb
+
+Conditions:
+  IsSbxEnv: !Equals [!Ref "Environment", sbx]
+
+Resources:
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+        - arn:aws:iam::aws:policy/AmazonRedshiftFullAccess
+      PermissionsBoundary: !Sub arn:aws:iam::${AWS::AccountId}:policy/PFE-BASELINE-DelegatedUserPermission-Boundary
+      RoleName:
+        Fn::Sub:
+         - CUSPFE-${Environment}-AWSGlueServiceRole
+         - Environment: !Ref Environment
+      Policies:
+        - PolicyName:
+            Fn::Sub:
+              - CUSPFE-${Environment}-AWSGlueServiceRole-policy
+              - Environment: !Ref Environment
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "secretsmanager:GetSecretValue"
+                Resource: 
+                  - !Sub arn:aws:secretsmanager:us-east-1:${AWS::AccountId}:secret:${Secretarn}
+                  - !Sub arn:aws:secretsmanager:us-east-1:${AWS::AccountId}:secret:${snowflakesecretarn}
+                  - !Sub arn:aws:secretsmanager:us-east-1:${AWS::AccountId}:secret:${Secretarnnp}
+              - Effect: Allow
+                Action: 
+                  - iam:PassRole
+                Resource:
+                    Fn::Sub:
+                     - arn:aws:iam::${AWS::AccountId}:role/CUSPFE-${Environment}-AWSGlueService*
+                     - Environment: !Ref Environment
+                Condition:
+                  StringLike:
+                    iam:PassedToService:
+                    - glue.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                    Fn::Sub:
+                     - arn:aws:s3:::${ReportingS3Bucket}/*
+                     - ReportingS3Bucket: !Ref ReportingS3Bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                    Fn::Sub:
+                     - arn:aws:s3:::${ReportingS3Bucket}
+                     - ReportingS3Bucket: !Ref ReportingS3Bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                    Fn::Sub:
+                     - arn:aws:s3:::${Environment}-vsl-openai-audit-logging
+                     - Environment: !Ref Environment 
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                    Fn::Sub:
+                     - arn:aws:s3:::${Environment}-vsl-openai-audit-logging/*
+                     - Environment: !Ref Environment
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                Resource: 
+                  - !Sub arn:aws:kms:us-east-1:${AWS::AccountId}:key/${Kmskey}
+                  - !Sub arn:aws:kms:us-east-1:${AWS::AccountId}:key/${Kmskeynp}
+
+  AnalyticsSG:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Retain
+    Properties:
+      GroupDescription: SG for glue service - Vox Analytics Project
+      GroupName: !Sub ${Environment}-vox-analytics-sg
+      VpcId: vpc-0aedf14e7c9f0c024
+      SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 5439
+            ToPort: 5439
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 1521
+            ToPort: 1521
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+ 
+  AnalyticsGroupIngress:
+      Type: 'AWS::EC2::SecurityGroupIngress'
+      Properties:
+        GroupId: !GetAtt AnalyticsSG.GroupId
+        SourceSecurityGroupId: !GetAtt AnalyticsSG.GroupId
+        IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+
+Outputs:
+  AnalyticsSG:
+    Description: SG id
+    Value: !GetAtt AnalyticsSG.GroupId
+    Export:
+      Name:
+       Fn::Sub:
+        - ${Environment}-vox-analytics-sg
+        - Environment: !Ref Environment

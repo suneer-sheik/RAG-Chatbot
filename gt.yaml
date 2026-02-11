@@ -1,0 +1,1473 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  Environment:  
+    Type: String
+    Default: dev
+  Rawwflschtime:
+    Type: String
+    Default: 30 10 * * ? *
+  Clsdwflschtime:
+    Type: String
+    Default: 0 12 * * ? *
+  Billwflschtime:
+    Type: String
+    Default: 30 12 * * ? *
+  Apiwflschtime:
+    Type: String
+    Default: 0 12 * * ? *
+  Incwflschtime:
+    Type: String
+    Default: 0 10 ? * MON-SUN *
+  Achwflschtime:
+    Type: String
+    Default: 30 15 1 * ? *
+  Tcwflschtime:
+    Type: String
+    Default: 30 13 * * ? *
+  adwflschtime:
+    Type: String
+    Default: 0 10 * * ? *
+
+Conditions:
+  IsStdEnv:
+    !Or [
+      !Equals [!Ref "Environment", prod],
+      !Equals [!Ref "Environment", dev]
+    ]
+  
+  IsSbxEnv:
+    !Equals [!Ref "Environment", sbx]
+  
+  IshigherEnv:
+    !Or [
+      !Equals [!Ref "Environment", prod],
+      !Equals [!Ref "Environment", test]
+    ]
+
+Resources:
+  
+  Trigger1:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub ${Environment}-Rawtocleansed_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Rawwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob11
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob7
+      WorkflowName: !Sub ${Environment}-Rawtocleansed
+
+  Trigger2:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger1
+    Properties:
+      Name: !Sub ${Environment}-RM_kpi_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Rawtocleansed
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob11
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob11
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger3:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger2
+    Properties:
+      Name: !Sub ${Environment}-ITSM_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Rawtocleansed
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob8
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob7
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  
+  Trigger4:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger3
+    Properties:
+      Name: !Sub ${Environment}-ITSM_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Rawtocleansed
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob7
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob7
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  
+  Trigger5:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger4
+    Properties:
+      Name: !Sub ${Environment}-ITSM_kpi_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Rawtocleansed
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob8
+            --jobstatus: FAILED 
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob8
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger6:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger5
+    Properties:
+      Name: !Sub ${Environment}-Cleansedtotarget_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Clsdwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob14
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob10
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob12
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+  
+  Trigger7:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger6
+    Properties:
+      Name: !Sub ${Environment}-vox_ops_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob14
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob14
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger8:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger7
+    Properties:
+      Name: !Sub ${Environment}-vox_metrics_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob10
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob10
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger9:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger8
+    Properties:
+      Name: !Sub ${Environment}-vox_metrics_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob32
+      Predicate:
+        Logical: AND
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob10
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  Trigger10:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger9
+    Properties:
+      Name: !Sub ${Environment}-vox_metrics_supervisors_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob32
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob32
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger11:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger10
+    Properties:
+      Name: !Sub ${Environment}-RM_data_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob12
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob12
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger12:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger11
+    Properties:
+      Name: !Sub ${Environment}-RM_Metrics_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob16
+      Predicate:
+        Logical: AND
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob32
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob12
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger13:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger12
+    Properties:
+      Name: !Sub ${Environment}-Executive_staging_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob16
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob16
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger14:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger13
+    Properties:
+      Name: !Sub ${Environment}-Executive_staging_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob6
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob16
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger15:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger14
+    Properties:
+      Name: !Sub ${Environment}-Executive_kpi_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Cleansedtotarget
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob6
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob6
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger16:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger15
+    Properties:
+      Name: !Sub ${Environment}-Billing_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Billwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob15
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob26
+      WorkflowName: !Sub ${Environment}-Billing
+  
+  Trigger17:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger16
+    Properties:
+      Name: !Sub ${Environment}-Vox-gpt-billing_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Billing
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob15
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob15
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger18:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger17
+    Properties:
+      Name: !Sub ${Environment}-Vox-api-billing_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Billing
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob26
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob26
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger19:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger18
+    Properties:
+      Name: !Sub ${Environment}-Apimemcpu_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Apiwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob19
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob17
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+  
+  Trigger20:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger19
+    Properties:
+      Name: !Sub ${Environment}-api_stage_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob18
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob17
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger21:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger20
+    Properties:
+      Name: !Sub ${Environment}-api_stage_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob17
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob17
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger22:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger21
+    Properties:
+      Name: !Sub ${Environment}-api_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob18
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob18
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger23:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger22
+    Properties:
+      Name: !Sub ${Environment}-api_mem_cpu_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob20
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob19
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger24:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger23
+    Properties:
+      Name: !Sub ${Environment}-api_mem_cpu_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob19
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob19
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger25:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger24
+    Properties:
+      Name: !Sub ${Environment}-api_mem_cpu_kpi_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Apimemcpu
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob20
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob20
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger26:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger25
+    Properties:
+      Name: !Sub ${Environment}-Incremental_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Incwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+             Fn::ImportValue: 
+               Fn::Sub: ${Environment}-GlueJob9
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob1
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob23
+        - !If
+          - IsStdEnv
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob35
+          - !Ref "AWS::NoValue"
+      WorkflowName: !Sub ${Environment}-Incremental
+  
+  Trigger27:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger26
+    Properties:
+      Name: !Sub ${Environment}-postgres_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob9
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob9
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger28:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger27
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_stage_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob22
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob1
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger29:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger28
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_stage_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob1
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob1
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger30:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger29
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_svc_metrics_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob2
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob3
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob4
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob13
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob37
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob22
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger31:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger30
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_svc_metrics_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob22
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob22
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger32:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger31
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_request_url_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob2
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob2
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger33:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger32
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_request_usecase_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob3
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob3
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger34:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger33
+    Properties:
+      Name: !Sub ${Environment}-Dynamo_request_app_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob4
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob4
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger35:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger34
+    Properties:
+      Name: !Sub ${Environment}-usecasename_map_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob13
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob13
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger36:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger35
+    Properties:
+      Name: !Sub ${Environment}-Tokens_consumed_s3_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob37
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob37
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger37:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger36
+    Properties:
+      Name: !Sub ${Environment}-Tokens_consumed_s3_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob25
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob37
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  Trigger38:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger37
+    Properties:
+      Name: !Sub ${Environment}-Tokens_consumed_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob25
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob25
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger39:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger38
+    Properties:
+      Name: !Sub ${Environment}-Tokens_consumed_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - !If
+          - IshigherEnv
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob39
+          - !Ref "AWS::NoValue"
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob33
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob25
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+          
+  Trigger40:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger39
+    Properties:
+      Name: !Sub ${Environment}-Tokens_consumed_retro_update_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob33
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob33
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger41:
+    Type: AWS::Glue::Trigger
+    Condition: IshigherEnv
+    DependsOn: Trigger40
+    Properties:
+      Name: !Sub ${Environment}-TC_LtoH_env_refresh_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob39
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob39
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger42:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger40
+    Properties:
+      Name: !Sub ${Environment}-Tokens_retro_cost_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob38
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob33
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  Trigger43:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger42
+    Properties:
+      Name: !Sub ${Environment}-Tokens_consumed_date_wise_update_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob38
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob38
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger44:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger43
+    Properties:
+      Name: !Sub ${Environment}-Translate_staging_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob23
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob23
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger45:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger44
+    Properties:
+      Name: !Sub ${Environment}-Translate_staging_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob5
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob23
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger46:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger45
+    Properties:
+      Name: !Sub ${Environment}-Translate_metrics_kpi_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob5
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob5
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger47:
+    Type: AWS::Glue::Trigger
+    Condition: IsStdEnv
+    DependsOn: Trigger46
+    Properties:
+      Name: !Sub ${Environment}-adobe_ext_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob36
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob35
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  Trigger48:
+    Type: AWS::Glue::Trigger
+    Condition: IsStdEnv
+    DependsOn: Trigger47
+    Properties:
+      Name: !Sub ${Environment}-adobe_ext_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob35
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob35
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger49:
+    Type: AWS::Glue::Trigger
+    Condition: IsStdEnv
+    DependsOn: Trigger48
+    Properties:
+      Name: !Sub ${Environment}-adobe_tf_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Incremental
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob36
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob36
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger50:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger46
+    Properties:
+      Name: !Sub ${Environment}-admin_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${adwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob30
+      WorkflowName: !Sub ${Environment}-Admin
+
+  Trigger51:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger50
+    Properties:
+      Name: !Sub ${Environment}-unit_cost_sp_insert_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob31
+      Predicate:
+        Logical: AND
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob30
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  Trigger52:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger51
+    Properties:
+      Name: !Sub ${Environment}-unit_cost_sp_insert_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob30
+            --jobstatus: FAILED
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob31
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob30
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger53:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger52
+    Properties:
+      Name: !Sub ${Environment}-unit_cost_sp_s3_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob28
+      Predicate:
+        Logical: AND
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob31
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+
+  Trigger54:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger53
+    Properties:
+      Name: !Sub ${Environment}-unit_cost_sp_s3_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob31
+            --jobstatus: FAILED
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob28
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob31
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger55:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger54
+    Properties:
+      Name: !Sub ${Environment}-api_unitcost_tables_success
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob29
+      Predicate:
+        Logical: AND
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob28
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  
+  Trigger56:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger55
+    Properties:
+      Name: !Sub ${Environment}-api_unitcost_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob28
+            --jobstatus: FAILED
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob29
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob28
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger57:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger56
+    Properties:
+      Name: !Sub ${Environment}-api_unitcost_history_tables_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Admin
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob29
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob29
+            LogicalOperator: EQUALS
+            State: FAILED
+
+  Trigger58:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger57
+    Properties:
+      Name: !Sub ${Environment}-Archival_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Achwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob27
+      WorkflowName: !Sub ${Environment}-Archival
+  
+  Trigger59:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger58
+    Properties:
+      Name: !Sub ${Environment}-Archival_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Archival
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob27
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob27
+            LogicalOperator: EQUALS
+            State: FAILED
+  
+  Trigger60:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger59
+    Properties:
+      Name: !Sub ${Environment}-Totalcount_main
+      Type: SCHEDULED
+      Schedule: !Sub cron(${Tcwflschtime})
+      StartOnCreation: true
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob24
+      WorkflowName: !Sub ${Environment}-Totalcount
+  
+  Trigger61:
+    Type: AWS::Glue::Trigger
+    DependsOn: Trigger60
+    Properties:
+      Name: !Sub ${Environment}-Totalcount_failure
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${Environment}-Totalcount
+      Actions:
+        - JobName: 
+            Fn::ImportValue: 
+              Fn::Sub: ${Environment}-GlueJob21
+          Arguments: 
+            --jobname: 
+                Fn::ImportValue: 
+                  Fn::Sub: ${Environment}-GlueJob24
+            --jobstatus: FAILED
+      Predicate:
+        Conditions:
+          - JobName: 
+              Fn::ImportValue: 
+                Fn::Sub: ${Environment}-GlueJob24
+            LogicalOperator: EQUALS
+            State: FAILED

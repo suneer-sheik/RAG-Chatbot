@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  Environment:  
+    Type: String
+    Default: dev
+
+Resources:
+  Rawtocleansedtablesworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of source to s3 jobs
+      Name: !Sub ${Environment}-Rawtocleansed
+  Cleansedtotargettablesworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of s3 to redshift jobs
+      Name: !Sub ${Environment}-Cleansedtotarget
+  Billingworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of Billing jobs
+      Name: !Sub ${Environment}-Billing
+  Apimemcpumetricsworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of dynamo api memory and cpu metrics jobs
+      Name: !Sub ${Environment}-Apimemcpu
+  Incrementalworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of incremental jobs
+      Name: !Sub ${Environment}-Incremental
+  Archivalworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of archival jobs
+      Name: !Sub ${Environment}-Archival
+  Totalcountworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of s3 to redshift jobs
+      Name: !Sub ${Environment}-Totalcount
+  Adminworkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      Description: Glue workflow of admin lookup jobs
+      Name: !Sub ${Environment}-Admin

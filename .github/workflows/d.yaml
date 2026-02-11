@@ -1,0 +1,233 @@
+
+name: Glue Job Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      Environment:
+        type: choice
+        description: Deployment Environment
+        required: true
+        options: 
+        - dev
+        - test
+        - prod
+      Rawwflschtime:
+        type: choice
+        description: Schedule-raw table-UTC
+        required: true
+        options:
+        - 30 10 * * ? *
+        - 15 10 * * ? *
+        - 00 10 * * ? *
+      Clsdwflschtime:
+        type: choice
+        description: Schedule-cleansed tables-UTC
+        required: true
+        options:
+        - 0 12 * * ? *
+        - 15 11 * * ? *
+        - 45 10 * * ? *
+      Billwflschtime:
+        type: choice
+        description: Schedule-Billing-UTC
+        required: true
+        options:
+        - 30 12 * * ? *
+        - 00 12 * * ? *
+        - 30 11 * * ? *
+      Apiwflschtime:
+        type: choice
+        description: Schedule-api metrics-UTC
+        required: true
+        options:
+        - 00 12 * * ? *
+        - 30 11 * * ? *
+        - 00 11 * * ? *
+      Incwflschtime:
+        type: choice
+        description: Schedule-incremental-UTC
+        options:
+        - 15 11 ? * MON-SUN *
+        - 40 10 ? * MON-SUN *
+        - 0 10 ? * MON-SUN *
+      Achwflschtime:
+        type: choice
+        description: Schedule-Archival-UTC
+        options:
+        - 30 15 1 * ? *
+        - 45 14 1 * ? *
+        - 30 14 1 * ? *
+      Tcwflschtime:
+        type: choice
+        description: Schedule-total count-UTC
+        options:
+        - 30 13 * * ? *
+        - 15 13 * * ? *
+        - 0 13 * * ? *
+      adwflschtime:
+        type: choice
+        description: Schedule-admin-UTC
+        options:
+        - 15 11 * * ? *
+        - 40 10 * * ? *
+        - 0 10 * * ? *
+
+permissions:
+  id-token: write
+  contents: write      
+
+jobs:
+  deploy:
+    name: Cloudformation Stack Deployment
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.Environment }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/${{secrets.AWS_OIDC_ROLE}}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload Python Scripts and Config files to S3 Bucket
+        run: |
+          aws s3 sync config_files/${{ github.event.inputs.Environment }}/ s3://${{ secrets.S3_BUCKET_NAME }}/voxanalytics/${{ github.event.inputs.Environment }}/config_files/
+          aws s3 sync config_txt_files/${{ github.event.inputs.Environment }}/ s3://${{ secrets.S3_BUCKET_NAME }}/voxanalytics/${{ github.event.inputs.Environment }}/config_files/
+          aws s3 sync job_scripts s3://${{ secrets.S3_BUCKET_NAME }}/voxanalytics/${{ github.event.inputs.Environment }}/main_script_path/
+          aws s3 sync dependent_libraries s3://${{ secrets.S3_BUCKET_NAME }}/voxanalytics/${{ github.event.inputs.Environment }}/dependent_libraries/
+
+      - name: Check and continue rollback stacks to UPDATE_ROLLBACK_COMPLETE
+        run: |
+          STACKS=(
+            "${{ github.event.inputs.Environment }}-GlueJobs"
+            "${{ github.event.inputs.Environment }}-GlueJobs-1"
+            "${{ github.event.inputs.Environment }}-GlueTriggers"
+            "${{ github.event.inputs.Environment }}-GlueTriggers-1"
+            "${{ github.event.inputs.Environment }}-GlueWorkflows"
+            "${{ github.event.inputs.Environment }}-SharedResourcesForGlueJobs"
+          )
+ 
+          
+          for STACK_NAME in "${STACKS[@]}"; do
+            STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "NOT_FOUND")
+            echo "Status of $STACK_NAME: $STATUS"
+            if [ "$STATUS" == "UPDATE_ROLLBACK_FAILED" ]; then
+            echo "Attempting to continue rollback for $STACK_NAME..."
+                    aws cloudformation continue-update-rollback --stack-name "$STACK_NAME" || echo "Rollback continuation failed for $STACK_NAME"
+                  fi
+                done
+
+      - name: Deploy Shared Resources to AWS with CloudFormation
+        # if: github.ref == 'refs/heads/sbx'
+        uses: aws-actions/aws-cloudformation-github-deploy@v1.2.0
+        with:
+          name: ${{ github.event.inputs.Environment }}-SharedResourcesForGlueJobs
+          template: shared_resources_for_glue.yaml
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND            
+          parameter-overrides: >-
+            AccountID=${{ secrets.AWS_ACCOUNT }},
+            ReportingS3Bucket=${{ secrets.S3_BUCKET_NAME }},
+            Environment=${{ github.event.inputs.Environment }},
+            Secretarn=${{secrets.SECRET_ARN}},
+            Kmskey=${{secrets.KMS_KEY}},
+            Secretarnnp=${{secrets.SECRET_ARN_NP}},
+            snowflakesecretarn=${{secrets.snowflakesecretarn}},
+            Kmskeynp=${{secrets.KMS_KEY_NP}}
+
+      - name: Deploy Glue Jobs to AWS with CloudFormation
+        id: deployStack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1.2.0
+        with:
+          name: ${{ github.event.inputs.Environment }}-GlueJobs
+          template: glue_jobs1.yaml
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND            
+          parameter-overrides: >-
+            Environment=${{ github.event.inputs.Environment }},
+            ReportingS3Bucket=${{ secrets.S3_BUCKET_NAME }},
+            POSTGRESJDBCURL=${{secrets.POSTGRESQL_JDBC_URL}},
+            POSTGRESUSER=${{secrets.POSTGRESQL_USERNAME}},
+            POSTGRESPASS=${{secrets.POSTGRESQL_PASS}},
+            POSTGRESDRIVER=${{secrets.POSTGRESQL_DRIVER}},
+            POSTGRESDRIVERPATH=${{secrets.POSTGRESQL_DRIVER_PATH}},
+            POSTGRESDBNAME=${{secrets.POSTGRESQL_DB_NAME}},
+            ORACLEJDBCURL=${{secrets.ORACLE_JDBC}},
+            ORACLEUSER=${{secrets.ORACLE_USERNAME}},
+            ORACLEPASS=${{secrets.ORACLE_PASS}},
+            SECRETID=${{secrets.SECRET_ID}},
+            REDSHIFTJDBCURL=${{secrets.REDSHIFT_JDBC_URL}},
+            REDSHIFTUSER=${{secrets.REDSHIFT_USER}},
+            SUBNETID=${{vars.SUBNET_ID}}
+
+      - name: Deploy Glue Jobs to AWS with CloudFormation
+        uses: aws-actions/aws-cloudformation-github-deploy@v1.2.0
+        with:
+          name: ${{ github.event.inputs.Environment }}-GlueJobs-1
+          template: glue_jobs2.yaml
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND            
+          parameter-overrides: >-
+            Environment=${{ github.event.inputs.Environment }},
+            ReportingS3Bucket=${{ secrets.S3_BUCKET_NAME }},
+            POSTGRESJDBCURL=${{secrets.POSTGRESQL_JDBC_URL}},
+            POSTGRESUSER=${{secrets.POSTGRESQL_USERNAME}},
+            POSTGRESPASS=${{secrets.POSTGRESQL_PASS}},
+            POSTGRESDRIVER=${{secrets.POSTGRESQL_DRIVER}},
+            POSTGRESDRIVERPATH=${{secrets.POSTGRESQL_DRIVER_PATH}},
+            POSTGRESDBNAME=${{secrets.POSTGRESQL_DB_NAME}},
+            ORACLEJDBCURL=${{secrets.ORACLE_JDBC}},
+            ORACLEUSER=${{secrets.ORACLE_USERNAME}},
+            ORACLEPASS=${{secrets.ORACLE_PASS}},
+            SECRETID=${{secrets.SECRET_ID}},
+            REDSHIFTJDBCURL=${{secrets.REDSHIFT_JDBC_URL}},
+            REDSHIFTUSER=${{secrets.REDSHIFT_USER}},
+            SUBNETID=${{vars.SUBNET_ID}}
+
+      - name: Deploy Glue Workflows to AWS with CloudFormation
+        uses: aws-actions/aws-cloudformation-github-deploy@v1.2.0
+        with:
+          name: ${{ github.event.inputs.Environment }}-GlueWorkflows
+          template: glue_workflows.yaml
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND
+          parameter-overrides: >-
+            Environment=${{ github.event.inputs.Environment }}
+
+      - name: Deploy Glue Triggers to AWS with CloudFormation
+        uses: aws-actions/aws-cloudformation-github-deploy@v1.2.0
+        with:
+          name: ${{ github.event.inputs.Environment }}-GlueTriggers
+          template: glue_triggers1.yaml
+          no-fail-on-empty-changeset: "1"
+          capabilities: CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND
+          parameter-overrides: >-
+            Environment=${{ github.event.inputs.Environment }},
+            Rawwflschtime=${{ github.event.inputs.Rawwflschtime }},
+            Clsdwflschtime=${{ github.event.inputs.Clsdwflschtime }},
+            Billwflschtime=${{ github.event.inputs.Billwflschtime }},
+            Apiwflschtime=${{ github.event.inputs.Apiwflschtime }},
+            Incwflschtime=${{ github.event.inputs.Incwflschtime }},
+            Achwflschtime=${{ github.event.inputs.Achwflschtime }},
+            Tcwflschtime=${{ github.event.inputs.Tcwflschtime }},
+            adwflschtime=${{ github.event.inputs.adwflschtime }}
+
+      # - name: Deploy Glue Triggers to AWS with CloudFormation
+      #   uses: aws-actions/aws-cloudformation-github-deploy@v1.2.0
+      #   with:
+      #     name: ${{ github.event.inputs.Environment }}-GlueTriggers-1
+      #     template: glue_triggers2.yaml
+      #     no-fail-on-empty-changeset: "1"
+      #     capabilities: CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND
+      #     parameter-overrides: >-
+      #       Environment=${{ github.event.inputs.Environment }},
+      #       Rawwflschtime=${{ github.event.inputs.Rawwflschtime }},
+      #       Clsdwflschtime=${{ github.event.inputs.Clsdwflschtime }},
+      #       Billwflschtime=${{ github.event.inputs.Billwflschtime }},
+      #       Apiwflschtime=${{ github.event.inputs.Apiwflschtime }},
+      #       Incwflschtime=${{ github.event.inputs.Incwflschtime }},
+      #       Achwflschtime=${{ github.event.inputs.Achwflschtime }},
+      #       Tcwflschtime=${{ github.event.inputs.Tcwflschtime }},
+      #       adwflschtime=${{ github.event.inputs.adwflschtime }}
